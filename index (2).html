@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>حضور وإجازات المهندسين</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--tx:#1b2333;--mut:#6b7488;--pri:#2457d6;--ok:#168a4a;--off:#c2410c;--bd:#e2e6ef}
+@media (prefers-color-scheme:dark){:root{--bg:#121722;--card:#1b2231;--tx:#e8ecf5;--mut:#98a2b8;--pri:#6b94ff;--ok:#4ade80;--off:#fb923c;--bd:#2a3347}}
+*{box-sizing:border-box}
+body{margin:0;font-family:Tahoma,Arial,sans-serif;background:var(--bg);color:var(--tx);padding:16px;max-width:900px;margin-inline:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+h1{font-size:20px;margin:0}
+button{font:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;padding:6px 12px}
+button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+#days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:14px}
+#days button{padding:12px 2px;font-weight:bold;font-size:15px}
+#days button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+#days small{display:block;font-weight:normal;font-size:11px;opacity:.85}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:600px){.cols{grid-template-columns:1fr}#days button{font-size:12px}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+.card h2{margin:0 0 10px;font-size:16px;display:flex;justify-content:space-between}
+.badge{border-radius:20px;padding:2px 12px;color:#fff;font-size:15px}
+.p .badge{background:var(--ok)}.l .badge{background:var(--off)}
+.row{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--bd)}
+.row:last-child{border:0}
+.row .n{flex:1}
+.sub{color:var(--mut);font-size:13px}
+.sub b{color:var(--tx)}
+.ic{width:28px;height:28px;padding:0;border-radius:50%;font-size:18px;line-height:1;font-weight:bold}
+.minus{color:var(--off)}.plus{color:var(--ok)}
+.pen{width:24px;height:24px;font-size:12px;padding:0}
+.edit{display:none}body.auth .edit{display:inline-block}
+#logs{margin-top:14px;font-size:13px;color:var(--mut)}
+#logs div{padding:4px 0;border-bottom:1px dashed var(--bd)}
+#msg{color:var(--off);font-size:13px;margin-top:6px}
+dialog{border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--tx);min-width:260px}
+dialog input{width:100%;padding:8px;margin:6px 0;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+</style>
+</head>
+<body>
+<header>
+  <h1>📅 حضور وإجازات المهندسين</h1>
+  <div><span id="who" class="sub"></span> <button id="loginBtn" class="pri">تسجيل دخول للتعديل</button></div>
+</header>
+<div id="days"></div>
+<div class="cols">
+  <div class="card p"><h2><span>✅ الحاضرون</span><span class="badge" id="pc">0</span></h2><div id="pl"></div></div>
+  <div class="card l"><h2><span>🏖️ الإجازة</span><span class="badge" id="lc">0</span></h2><div id="ll"></div></div>
+</div>
+<div class="card" id="logs"><b>سجل التعديلات (آخر 15)</b><div id="logList"></div></div>
+
+<dialog id="dlg"><form method="dialog" id="f">
+  <b>تسجيل الدخول</b>
+  <input id="u" placeholder="البريد الإلكتروني" type="email" autocomplete="username">
+  <input id="pw" type="password" placeholder="الباسورد" autocomplete="current-password">
+  <div id="msg"></div>
+  <button type="submit" class="pri">دخول</button> <button type="button" id="cancel">إلغاء</button>
+</form></dialog>
+
+<script type="module">
+// ===== 1) ضع إعدادات Firebase الخاصة بك هنا =====
+const firebaseConfig = {
+  apiKey: "AIzaSyBCstzJM1AUQSoCGT0KWE5_rK8uSG5SwME",
+  authDomain: "shaban-marzouk.firebaseapp.com",
+  projectId: "shaban-marzouk",
+  appId: "1:415194562233:web:7eb8cde1697982fbb2a568"
+};
+// المستخدمون المسموح لهم بالتعديل (اسم الدخول -> الاسم الظاهر في السجل)
+const USERS = { "sh.marzouk20@gmail.com": "shaban.marzouk", "islam.alfedawy@gb-auto.com": "islam el fedawy" };
+
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,onSnapshot,setDoc,addDoc,collection,query,orderBy,limit,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
+const DAYS=["السبت","الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة"];
+const D={"السبت":0,"الأحد":1,"الاثنين":2,"الثلاثاء":3,"الأربعاء":4,"الخميس":5,"الجمعة":6};
+const mk=(n,a,b,s="")=>({name:n,off:[D[a],D[b]],sub:s});
+let engineers=[
+ mk("نصار","الخميس","الجمعة","نانسي"),mk("اسماعيل","الخميس","الجمعة","عباس"),
+ mk("مارجريت","الجمعة","السبت","فؤاد"),mk("نانسي","الأحد","الاثنين"),
+ mk("زياد","الثلاثاء","الأربعاء","احمد رجب"),mk("طه","الأحد","الأربعاء","خالد"),
+ mk("عبدالعزيز","الجمعة","السبت","عبدالرحمن"),mk("خالد","الجمعة","السبت"),
+ mk("عبدالرحمن","الثلاثاء","الأربعاء"),mk("فؤاد","الاثنين","الثلاثاء","اسماعيل سيد"),
+ mk("سارة","الأربعاء","الخميس"),mk("عباس","الاثنين","الثلاثاء","اسماعيل"),
+ mk("احمد رجب","الأحد","الاثنين"),mk("اسماعيل سيد","الخميس","السبت")
+];
+let day=(new Date().getDay()+1)%7; // JS: الأحد=0 -> عندنا الأحد=1
+let user=null;
+const $=id=>document.getElementById(id);
+const ref=doc(db,"config","schedule");
+
+function render(){
+  $("days").innerHTML=DAYS.map((d,i)=>{
+    const l=engineers.filter(e=>e.off.includes(i)).length;
+    return `<button class="${i==day?'on':''}" data-d="${i}">${d}<small>${engineers.length-l} حضور · ${l} إجازة</small></button>`}).join("");
+  const pres=[],off=[];
+  engineers.forEach((e,i)=>(e.off.includes(day)?off:pres).push([e,i]));
+  $("pc").textContent=pres.length; $("lc").textContent=off.length;
+  $("pl").innerHTML=pres.map(([e,i])=>`<div class="row"><span class="n">${e.name}</span><button class="ic minus edit" data-a="off" data-i="${i}" title="نقل للإجازة">−</button></div>`).join("")||'<div class="sub">لا أحد</div>';
+  $("ll").innerHTML=off.map(([e,i])=>`<div class="row"><span class="n">${e.name}<div class="sub">البديل: <b>${e.sub||"— غير محدد —"}</b></div></span>
+    <button class="ic pen edit" data-a="sub" data-i="${i}" title="تعديل البديل">✎</button>
+    <button class="ic plus edit" data-a="on" data-i="${i}" title="نقل للحضور">+</button></div>`).join("")||'<div class="sub">لا أحد</div>';
+}
+async function save(text){
+  if(!user)return;
+  try{
+    await setDoc(ref,{engineers});
+    await addDoc(collection(db,"logs"),{user:USERS[user]||user,action:text,ts:serverTimestamp()});
+  }catch(e){alert("فشل الحفظ: لا تملك صلاحية أو لا يوجد اتصال")}
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  if(b.dataset.d!==undefined){day=+b.dataset.d;render();return}
+  if(!b.dataset.a||!user)return;
+  const en=engineers[+b.dataset.i];
+  if(b.dataset.a=="off"){en.off=[...new Set([...en.off,day])];save(`نقل ${en.name} إلى إجازة يوم ${DAYS[day]}`)}
+  if(b.dataset.a=="on"){en.off=en.off.filter(x=>x!=day);save(`نقل ${en.name} إلى حضور يوم ${DAYS[day]}`)}
+  if(b.dataset.a=="sub"){const v=prompt(`البديل للمهندس ${en.name}:`,en.sub);if(v===null)return;
+    const old=en.sub;en.sub=v.trim();save(`تغيير بديل ${en.name} من "${old||"-"}" إلى "${en.sub||"-"}"`)}
+  render();
+});
+onSnapshot(ref,s=>{if(s.exists()){engineers=s.data().engineers;render()}},()=>{});
+onSnapshot(query(collection(db,"logs"),orderBy("ts","desc"),limit(15)),s=>{
+  $("logList").innerHTML=s.docs.map(d=>{const x=d.data();const t=x.ts?x.ts.toDate().toLocaleString("ar-EG"):"";
+    return `<div>${t} — <b>${x.user}</b>: ${x.action}</div>`}).join("")||"لا يوجد تعديلات بعد";
+},()=>{});
+// login
+$("loginBtn").onclick=()=>{ if(user){signOut(auth)}else{$("msg").textContent="";$("dlg").showModal()} };
+$("cancel").onclick=()=>$("dlg").close();
+$("f").onsubmit=async ev=>{
+  ev.preventDefault();
+  const u=$("u").value.trim().toLowerCase();
+  try{await signInWithEmailAndPassword(auth,u,$("pw").value);$("dlg").close();$("pw").value=""}
+  catch(e){$("msg").textContent="بيانات الدخول غير صحيحة";ev.target.closest("dialog").showModal()}
+};
+onAuthStateChanged(auth,u=>{
+  user=u?u.email.toLowerCase():null;
+  document.body.classList.toggle("auth",!!user);
+  $("who").textContent=user?("👤 "+(USERS[user]||user)):"عرض فقط";
+  $("loginBtn").textContent=user?"تسجيل خروج":"تسجيل دخول للتعديل";
+});
+render();
+</script>
+</body>
+</html>
